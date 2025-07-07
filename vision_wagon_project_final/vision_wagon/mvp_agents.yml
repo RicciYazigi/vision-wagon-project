@@ -1,0 +1,46 @@
+
+# Archivo: vision_wagon/blueprints/mvp_agents.yml
+# Blueprint para los agentes mínimos viables de Nómada Alpha
+
+agents:
+  - name: "Psychology"
+    type: "executive"
+    description: "Define arquetipos de cliente y analiza perfiles psicológicos."
+
+  - name: "Finance"
+    type: "executive"
+    description: "Gestiona proyecciones financieras y modelos de monetización."
+
+  - name: "Security"
+    type: "executive"
+    description: "Protege la plataforma, los datos y garantiza el cumplimiento legal."
+
+  - name: "NarrativeArchitect"
+    type: "operational"
+    description: "Diseña los arcos narrativos, tramas y diálogos, asistido por IA."
+
+  - name: "Copywriter"
+    type: "operational"
+    description: "Genera contenido textual y copys utilizando LLMs."
+
+  - name: "Image"
+    type: "operational"
+    description: "Genera activos visuales e imágenes utilizando modelos de IA generativa."
+
+  - name: "Assembly"
+    type: "operational"
+    description: "Ensambla los activos generados (texto, imagen) en productos finales (episodios)."
+
+
+
+
+  # --- Nuevos Agentes para Nómada v4.3 ---
+  - name: "Coaching"
+    type: "operational"
+    description: "Aplica las directrices del usuario al perfil de personalidad del avatar de IA."
+
+  - name: "Moderation"
+    type: "operational"
+    description: "Analiza y pre-modera el contenido generado por el usuario para asegurar un entorno seguro."
+
+

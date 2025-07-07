@@ -1,0 +1,176 @@
+# Nómada Alpha - Configuración Principal
+# Sistema de narrativas interactivas en tiempo real
+
+app:
+  name: "Nómada Alpha"
+  version: "1.0.0"
+  environment: "development"  # development, staging, production
+  debug: true
+  description: "Sistema de agentes narrativos interactivos que evolucionan con la audiencia"
+
+# Configuración del Story Engine
+story_engine:
+  max_concurrent_stories: 10
+  auto_save_interval: 300  # segundos
+  narrative_complexity: "medium"  # simple, medium, complex
+  max_story_length: 10000  # palabras
+  branching_factor: 3  # opciones por decisión
+  audience_influence_threshold: 0.3
+
+# Configuración del Character System
+character_system:
+  max_characters_per_story: 20
+  personality_evolution_rate: 0.1
+  audience_influence_weight: 0.3
+  memory_decay_rate: 0.01
+  relationship_update_threshold: 0.1
+  emotional_volatility_base: 0.1
+
+# Configuración del World Builder
+world_builder:
+  max_worlds: 50
+  max_locations_per_world: 100
+  event_generation_interval: 300  # segundos
+  weather_change_probability: 0.1
+  time_advancement_rate: 1.0
+  audience_influence_weight: 0.2
+
+# Configuración del Audience Manager
+audience_manager:
+  max_interactions_history: 10000
+  interaction_processing_batch_size: 50
+  sentiment_analysis_enabled: true
+  auto_response_enabled: true
+  influence_calculation_interval: 60.0  # segundos
+  poll_default_duration: 300  # segundos
+  user_inactivity_threshold: 3600  # segundos
+  spam_detection_enabled: true
+  moderation_enabled: true
+
+# Configuración del Content Generator
+content_generator:
+  image_generation_enabled: true
+  audio_generation_enabled: true
+  video_generation_enabled: false  # Requiere upgrade
+  max_concurrent_generations: 5
+  image_quality: "high"  # low, medium, high
+  audio_quality: "medium"  # low, medium, high
+  content_cache_enabled: true
+  cache_duration: 3600  # segundos
+
+# Configuración del servidor API
+api_server:
+  host: "0.0.0.0"
+  port: 8080
+  cors_enabled: true
+  cors_origins: ["*"]
+  rate_limiting_enabled: true
+  rate_limit_requests: 100
+  rate_limit_window: 60  # segundos
+  websocket_enabled: true
+  websocket_port: 8765
+  api_key_required: false
+  max_request_size: 10485760  # 10MB
+
+# Configuración de integración con Vision Wagon
+vision_wagon:
+  enabled: false  # Cambiar a true cuando esté disponible
+  api_endpoint: "http://localhost:8000"
+  api_key: null  # Configurar con la clave real
+  timeout: 30  # segundos
+  max_retries: 3
+  models:
+    text_generation: "gpt-4"
+    image_generation: "dall-e-3"
+    audio_generation: "whisper"
+    video_generation: "runway-ml"
+
+# Configuración de plataformas de streaming
+platforms:
+  twitch:
+    enabled: false
+    client_id: null
+    client_secret: null
+    oauth_token: null
+    channel: null
+    
+  youtube:
+    enabled: false
+    api_key: null
+    video_id: null
+    
+  discord:
+    enabled: false
+    bot_token: null
+    guild_id: null
+    channel_id: null
+    
+  tiktok:
+    enabled: false
+    api_key: null
+    
+  custom_websocket:
+    enabled: true
+    port: 8765
+
+# Configuración de base de datos
+database:
+  type: "sqlite"  # sqlite, postgresql, mysql
+  path: "data/nomada_alpha.db"  # Para SQLite
+  # Para PostgreSQL/MySQL:
+  # host: "localhost"
+  # port: 5432
+  # database: "nomada_alpha"
+  # username: "user"
+  # password: "password"
+  connection_pool_size: 10
+  auto_backup: true
+  backup_interval: 3600  # segundos
+
+# Configuración de logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file_enabled: true
+  file_path: "logs/nomada_alpha.log"
+  file_max_size: 10485760  # 10MB
+  file_backup_count: 5
+  console_enabled: true
+  json_format: false
+
+# Configuración de seguridad
+security:
+  encryption_enabled: false
+  encryption_key: null
+  session_timeout: 3600  # segundos
+  max_login_attempts: 5
+  lockout_duration: 300  # segundos
+  cors_allowed_origins: ["*"]
+  csrf_protection: false
+
+# Configuración de performance
+performance:
+  max_memory_usage: 2147483648  # 2GB
+  max_cpu_usage: 80  # porcentaje
+  cache_enabled: true
+  cache_size: 1000
+  async_processing: true
+  worker_threads: 4
+
+# Configuración de monitoreo
+monitoring:
+  metrics_enabled: true
+  metrics_interval: 60  # segundos
+  health_check_enabled: true
+  health_check_interval: 300  # segundos
+  alerts_enabled: false
+  alert_email: null
+
+# Configuración de desarrollo
+development:
+  hot_reload: true
+  debug_mode: true
+  test_data_enabled: true
+  mock_external_apis: true
+  profiling_enabled: false
+

@@ -1,0 +1,118 @@
+# Vision Wagon - Configuración de Ejemplo
+# Copiar este archivo como config.yaml y personalizar según necesidades
+
+# Configuración del Sistema
+system:
+  environment: "development"  # development, staging, production
+  debug: true
+  host: "0.0.0.0"
+  port: 8000
+  workers: 1
+  reload: true
+  data_directory: "data"
+  temp_directory: "temp"
+  max_upload_size: 104857600  # 100MB
+
+# Configuración de Base de Datos
+database:
+  url: "sqlite:///./vision_wagon.db"
+  async_url: "sqlite+aiosqlite:///./vision_wagon.db"
+  pool_size: 5
+  max_overflow: 10
+  pool_timeout: 30
+  pool_recycle: 3600
+
+# Configuración de Agentes
+agent:
+  max_retries: 3
+  timeout: 30.0
+  debug_mode: false
+  log_level: "INFO"
+  custom_settings: {}
+
+# Configuración de Seguridad
+security:
+  enable_authentication: false  # Deshabilitado para desarrollo
+  enable_authorization: false   # Deshabilitado para desarrollo
+  jwt_secret_key: "development-secret-key-change-in-production"
+  jwt_algorithm: "HS256"
+  jwt_expiration_hours: 24
+  rate_limiting_enabled: false  # Deshabilitado para desarrollo
+  max_requests_per_minute: 100
+  allowed_origins: ["*"]
+  enable_https_only: false
+
+# Configuración de APIs Externas
+api:
+  openai_api_key: ""      # Configurar para generación de texto
+  anthropic_api_key: ""   # Configurar para Claude
+  stability_api_key: ""   # Configurar para generación de imágenes
+  elevenlabs_api_key: ""  # Configurar para síntesis de voz
+  replicate_api_key: ""   # Configurar para modelos adicionales
+  timeout: 60.0
+  max_retries: 3
+
+# Configuración de Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file_enabled: true
+  file_path: "logs/vision_wagon.log"
+  max_file_size: 10485760  # 10MB
+  backup_count: 5
+  console_enabled: true
+
+# Configuración del Orquestador
+orchestrator:
+  max_concurrent_tasks: 10
+  task_timeout: 300.0
+  retry_delay: 5.0
+  health_check_interval: 60.0
+  enable_task_queue: true
+  queue_backend: "memory"  # memory, redis, rabbitmq
+
+# Configuraciones Específicas de Agentes
+agents:
+  intelligence_agent:
+    analysis_cache_ttl: 3600
+    max_data_points: 10000
+    enable_visualizations: true
+    
+  security_agent:
+    scan_interval: 300
+    threat_threshold: 0.7
+    auto_response: true
+    
+  # Agregar configuraciones para otros agentes aquí
+
+# Configuraciones de Contenido
+content:
+  default_style: "modern"
+  output_formats: ["png", "jpg", "mp3", "mp4", "pdf", "html"]
+  max_generation_time: 300
+  cache_generated_content: true
+  
+# Configuraciones de Workflows
+workflows:
+  enable_templates: true
+  max_steps_per_workflow: 50
+  default_timeout: 600
+  
+# Configuraciones de Desarrollo
+development:
+  enable_debug_endpoints: true
+  mock_external_apis: false
+  log_all_requests: false
+  enable_profiling: false
+
+# Variables de Entorno (se pueden sobrescribir)
+# Estas configuraciones se pueden establecer como variables de entorno:
+# - DATABASE_URL
+# - OPENAI_API_KEY
+# - JWT_SECRET_KEY
+# - ENVIRONMENT
+# - DEBUG
+# - HOST
+# - PORT
+# - LOG_LEVEL
+

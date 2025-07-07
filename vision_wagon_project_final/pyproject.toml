@@ -1,0 +1,5 @@
+[project]
+name = "vision_wagon"
+version = "0.1.0"
+description = "Vision Wagon platform"
+requires-python = ">=3.9"
