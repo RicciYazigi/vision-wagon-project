@@ -51,13 +51,15 @@ class AssemblyAgent(BaseAgent):
         
         # Verificar que todos los contenidos estén aprobados por moderación
         approved_contents = []
-        for content_id in content_ids:
-            content = await db_manager.get_content(content_id)
+        for content_id_str in content_ids: # Assuming content_ids are strings
+            # The new database.py get_content_by_id expects a string UUID
+            content = await db_manager.get_content_by_id(content_id_str)
             if not content:
-                return AgentResult(success=False, error=f"Contenido {content_id} no encontrado")
+                return AgentResult(success=False, error=f"Contenido {content_id_str} no encontrado")
             
-            if content.is_flagged or content.moderation_status != "approved":
-                return AgentResult(success=False, error=f"Contenido {content_id} no ha sido aprobado por moderación")
+            # Assuming moderation_status is a field in Content model, which it is.
+            if content.is_flagged or getattr(content, 'moderation_status', 'pending') != "approved":
+                return AgentResult(success=False, error=f"Contenido {content_id_str} no ha sido aprobado por moderación. Estado: {getattr(content, 'moderation_status', 'desconocido')}, Marcado: {content.is_flagged}")
             
             approved_contents.append(content)
         
@@ -120,7 +122,8 @@ class AssemblyAgent(BaseAgent):
         if not content_id:
             return AgentResult(success=False, error="ID de contenido requerido para validación")
         
-        content = await db_manager.get_content(content_id)
+        # Use get_content_by_id from the new database.py
+        content = await db_manager.get_content_by_id(content_id)
         if not content:
             return AgentResult(success=False, error="Contenido no encontrado")
         

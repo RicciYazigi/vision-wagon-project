@@ -157,10 +157,18 @@ class Orchestrator:
         try:
             self.is_running = True
             
-            # Inicializar base de datos
-            if not await db_manager.test_connection_async():
-                raise Exception("No se pudo conectar a la base de datos")
-            
+            # Asegurarse que db_manager esté inicializado (normalmente se hace en main.py)
+            # pero por si acaso el orquestador se inicia independientemente o antes.
+            if not db_manager._initialized:
+                logger.warning("Orchestrator: DatabaseManager no inicializado, intentando inicializar...")
+                await db_manager.initialize()
+
+            # Verificar conexión a la BD usando la función de health_check del nuevo database.py
+            db_health = await db_manager.health_check() # Asumiendo que db_manager tiene health_check
+            if db_health.get('status') != 'healthy':
+                raise Exception(f"Orchestrator: Fallo en la verificación de salud de la base de datos al iniciar: {db_health.get('error', 'Error desconocido')}")
+            logger.info("Orchestrator: Conexión a base de datos verificada.")
+
             # Iniciar workers para procesamiento de tareas
             for i in range(self.max_concurrent_tasks):
                 worker = asyncio.create_task(self._task_worker(f"worker_{i}"))
@@ -544,7 +552,8 @@ class Orchestrator:
         unhealthy_agents = [agent_id for agent_id in results if agent_id is not None]
 
         # Verificar base de datos
-        db_healthy = await db_manager.test_connection_async()
+        db_health_status = await db_manager.health_check() # Usar la nueva función de health_check
+        db_healthy = db_health_status.get('status') == 'healthy'
         
         # Verificar cola de tareas
         queue_size = self.task_queue.qsize()

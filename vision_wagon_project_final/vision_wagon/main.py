@@ -25,7 +25,8 @@ logger = logging.getLogger(__name__)
 
 # Importar componentes principales
 from .config_manager import get_config
-from .database import db_manager, init_database
+# Updated import for the new DatabaseManager instance and specific functions if needed
+from .database import db_manager, health_check as db_health_check
 from .orchestrator import get_orchestrator
 from .constructor.constructor import get_constructor
 from .security_validator import get_security_validator
@@ -122,16 +123,17 @@ class VisionWagon:
 
     async def _initialize_database(self) -> None:
         """Inicializa la base de datos"""
-        logger.info("📊 Inicializando base de datos...")
-        
-        # Verificar conexión
-        if not await db_manager.test_connection_async():
-            raise Exception("No se pudo conectar a la base de datos")
-        
-        # Crear tablas si no existen
-        await init_database()
-        
-        logger.info("✅ Base de datos inicializada")
+        logger.info("📊 Inicializando base de datos con DatabaseManager...")
+        try:
+            await db_manager.initialize() # Initialize the new DatabaseManager
+            # Test connection using the new health_check or a similar test
+            health = await db_health_check()
+            if health.get('status') != 'healthy':
+                raise Exception(f"Fallo en la verificación de salud de la base de datos: {health.get('error', 'Error desconocido')}")
+            logger.info("✅ Base de datos inicializada y conexión verificada.")
+        except Exception as e:
+            logger.error(f"❌ Error inicializando la base de datos: {str(e)}", exc_info=True)
+            raise # Re-raise para detener la inicialización de la aplicación
 
     async def _initialize_components(self) -> None:
         """Inicializa los componentes principales"""
@@ -194,8 +196,10 @@ class VisionWagon:
         logger.info("🔍 Verificando sistema...")
         
         # Verificar base de datos
-        if not await db_manager.test_connection_async():
-            raise Exception("Verificación de base de datos fallida")
+        db_health = await db_health_check()
+        if db_health.get('status') != 'healthy':
+            raise Exception(f"Verificación de base de datos fallida en _verify_system: {db_health.get('error', 'Error desconocido')}")
+        logger.info("✅ Verificación de base de datos en _verify_system: OK")
         
         # Verificar orquestador
         orchestrator = get_orchestrator()
@@ -258,12 +262,16 @@ class VisionWagon:
                     await agent.cleanup()
                     logger.info(f"✅ {agent_name} limpiado")
                 except Exception as e:
-                    logger.error(f"Error limpiando {agent_name}: {str(e)}")
+                    logger.error(f"Error limpiando {agent_name}: {str(e)}", exc_info=True)
             
+            # Cerrar conexiones de base de datos
+            await db_manager.close()
+            logger.info("✅ Conexiones de base de datos cerradas.")
+
             logger.info("👋 Vision Wagon cerrado exitosamente")
             
         except Exception as e:
-            logger.error(f"Error durante el cierre: {str(e)}")
+            logger.error(f"Error durante el cierre: {str(e)}", exc_info=True)
 
     def get_system_info(self) -> Dict[str, Any]:
         """Obtiene información del sistema"""
