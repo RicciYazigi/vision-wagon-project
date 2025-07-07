@@ -156,19 +156,28 @@ class VisionWagon:
         
         orchestrator = get_orchestrator()
         
-        # Intelligence Agent
-        intelligence_agent = IntelligenceAgent()
-        await orchestrator.register_agent(intelligence_agent)
-        self.agents['intelligence'] = intelligence_agent
-        logger.info("✅ Intelligence Agent registrado")
-        
-        # Security Agent
-        security_agent = SecurityAgent()
-        await orchestrator.register_agent(security_agent)
-        self.agents['security'] = security_agent
-        logger.info("✅ Security Agent registrado")
-        
-        logger.info(f"✅ {len(self.agents)} agentes registrados")
+        # Registrar agentes definidos e importados
+        agents_to_register = [
+            AssemblyAgent(),
+            CoachingAgent(),
+            ModerationAgent(),
+            NarrativeArchitectAgent()
+            # TODO: Considerar CampaignAgent si está listo y es necesario en la inicialización.
+            # from .agents.campaign.campaign_agent import CampaignAgent
+            # CampaignAgent(),
+        ]
+
+        for agent_instance in agents_to_register:
+            try:
+                await orchestrator.register_agent(agent_instance)
+                self.agents[agent_instance.agent_id] = agent_instance
+                logger.info(f"✅ Agente '{agent_instance.agent_id}' registrado exitosamente.")
+            except Exception as e:
+                logger.error(f"❌ Error registrando agente '{agent_instance.agent_id}': {str(e)}")
+                # Decidir si continuar o detener la inicialización si un agente falla
+                # Por ahora, continuaremos registrando otros agentes.
+
+        logger.info(f"✅ {len(self.agents)} agentes registrados en total.")
 
     async def _start_orchestrator(self) -> None:
         """Inicia el orquestador"""

@@ -118,10 +118,11 @@ class Orchestrator:
         self.agent_capabilities: Dict[str, List[str]] = {}
         
         # Gestión de tareas
-        self.task_queue = asyncio.PriorityQueue()
+        self.task_queue = asyncio.PriorityQueue() # Stores (priority, time, task_obj)
+        self.pending_tasks_by_id: Dict[str, Task] = {} # For quick lookup of tasks in queue
         self.running_tasks: Dict[str, Task] = {}
-        self.completed_tasks: Dict[str, Task] = {}
-        self.failed_tasks: Dict[str, Task] = {}
+        self.completed_tasks: Dict[str, Task] = {} # Includes successfully completed tasks
+        self.failed_tasks: Dict[str, Task] = {} # Includes failed and cancelled tasks
         
         # Gestión de workflows
         self.workflows: Dict[str, Workflow] = {}
@@ -312,6 +313,7 @@ class Orchestrator:
         # Agregar a cola con prioridad
         priority_value = priority.value
         await self.task_queue.put((priority_value, task.created_at, task))
+        self.pending_tasks_by_id[task.task_id] = task # Add to lookup dict
         
         logger.info(f"Tarea enviada: {task.task_id} ({task_type}) -> {agent_id}")
         
@@ -330,23 +332,8 @@ class Orchestrator:
         for dep_id in task.dependencies:
             if dep_id not in self.completed_tasks:
                 # Verificar si la dependencia está en ejecución o pendiente
-                if dep_id not in self.running_tasks:
-                    # Buscar en cola
-                    found = False
-                    temp_queue = []
-                    
-                    while not self.task_queue.empty():
-                        item = await self.task_queue.get()
-                        temp_queue.append(item)
-                        if item[2].task_id == dep_id:
-                            found = True
-                    
-                    # Restaurar cola
-                    for item in temp_queue:
-                        await self.task_queue.put(item)
-                    
-                    if not found:
-                        raise ValueError(f"Dependencia no encontrada: {dep_id}")
+                if dep_id not in self.running_tasks and dep_id not in self.pending_tasks_by_id:
+                    raise ValueError(f"Dependencia no encontrada o no en estado válido: {dep_id}")
 
     async def _task_worker(self, worker_id: str) -> None:
         """Worker que procesa tareas de la cola"""
@@ -360,20 +347,36 @@ class Orchestrator:
                         self.task_queue.get(), timeout=1.0
                     )
                 except asyncio.TimeoutError:
-                    continue
+                    continue # Continue to next iteration of while loop to check self.is_running
+
+                # Task dequeued, remove from pending_tasks_by_id
+                if task.task_id in self.pending_tasks_by_id:
+                    del self.pending_tasks_by_id[task.task_id]
                 
-                # Verificar dependencias
+                # Verificar dependencias y estado de la tarea antes de procesar
+                if task.status == TaskStatus.CANCELLED:
+                    logger.info(f"Worker {worker_id}: Tarea {task.task_id} ya estaba cancelada, descartando.")
+                    # Asegurarse de que esté en failed_tasks si se canceló mientras estaba en la cola
+                    if task.task_id not in self.failed_tasks:
+                         self.failed_tasks[task.task_id] = task
+                    continue
+
                 if not await self._check_task_dependencies(task):
-                    # Reenviar a cola si las dependencias no están listas
+                    # Re-enqueue if dependencies are not met
+                    logger.debug(f"Dependencias no listas para tarea {task.task_id}, re-encolando.")
                     await self.task_queue.put((priority, created_at, task))
-                    await asyncio.sleep(1)
+                    self.pending_tasks_by_id[task.task_id] = task # Add back to lookup
+                    await asyncio.sleep(1) # Avoid busy-looping
                     continue
                 
                 # Ejecutar tarea
-                await self._execute_task(task, worker_id)
+                await self._process_single_task(task, worker_id)
                 
+            except asyncio.CancelledError:
+                logger.info(f"Worker {worker_id} cancelado.")
+                break # Exit the while loop
             except Exception as e:
-                logger.error(f"Error en worker {worker_id}: {str(e)}")
+                logger.error(f"Error en worker {worker_id}: {str(e)}", exc_info=True)
                 await asyncio.sleep(1)
         
         logger.info(f"Worker {worker_id} detenido")
@@ -385,126 +388,94 @@ class Orchestrator:
                 return False
         return True
 
-    async def _execute_task(self, task: Task, worker_id: str) -> None:
+    async def _process_single_task(self, task: Task, worker_id: str) -> None:
         """
-        Ejecuta una tarea específica.
-        
-        Args:
-            task: Tarea a ejecutar
-            worker_id: ID del worker que ejecuta la tarea
+        Procesa una única tarea: la ejecuta, maneja su resultado (éxito/fallo),
+        y actualiza su estado y las métricas.
         """
         task.status = TaskStatus.RUNNING
         task.started_at = datetime.utcnow()
         self.running_tasks[task.task_id] = task
         
-        logger.info(f"Ejecutando tarea {task.task_id} en worker {worker_id}")
+        logger.info(f"Worker {worker_id}: Iniciando tarea {task.task_id} ({task.task_type}) por agente {task.agent_id}")
         
         try:
-            # Emitir evento de inicio
-            await self._emit_event('task_started', {
-                'task_id': task.task_id,
-                'worker_id': worker_id,
-                'agent_id': task.agent_id
-            })
+            await self._emit_event('task_started', {'task_id': task.task_id, 'worker_id': worker_id, 'agent_id': task.agent_id})
             
-            # Obtener agente
             agent = self.registered_agents[task.agent_id]
-            
-            # Ejecutar con timeout
             result = await asyncio.wait_for(
                 agent.process(task.context),
                 timeout=task.timeout
             )
             
-            # Procesar resultado
             task.result = result
             task.completed_at = datetime.utcnow()
             
             if result.success:
-                task.status = TaskStatus.COMPLETED
-                self.completed_tasks[task.task_id] = task
-                
-                # Ejecutar callback si existe
-                if task.callback:
-                    try:
-                        await task.callback(task, result)
-                    except Exception as e:
-                        logger.error(f"Error en callback de tarea {task.task_id}: {str(e)}")
-                
-                logger.info(f"Tarea completada: {task.task_id}")
-                
-                # Emitir evento de éxito
-                await self._emit_event('task_completed', {
-                    'task_id': task.task_id,
-                    'execution_time': (task.completed_at - task.started_at).total_seconds(),
-                    'result': result.data if hasattr(result, 'data') else None
-                })
-                
+                await self._handle_task_success(task)
             else:
-                # Tarea falló
                 task.error = result.error
-                await self._handle_task_failure(task)
+                await self._handle_task_failure(task, worker_id)
         
         except asyncio.TimeoutError:
-            task.error = f"Timeout después de {task.timeout} segundos"
-            await self._handle_task_failure(task)
-            
+            task.error = f"Timeout ({task.timeout}s) ejecutando tarea {task.task_id}"
+            logger.warning(task.error)
+            await self._handle_task_failure(task, worker_id)
         except Exception as e:
-            task.error = f"Error de ejecución: {str(e)}"
-            logger.error(f"Error ejecutando tarea {task.task_id}: {str(e)}")
-            logger.error(traceback.format_exc())
-            await self._handle_task_failure(task)
+            task.error = f"Excepción ejecutando tarea {task.task_id}: {str(e)}"
+            logger.error(task.error, exc_info=True)
+            await self._handle_task_failure(task, worker_id)
         
         finally:
-            # Remover de tareas en ejecución
             if task.task_id in self.running_tasks:
                 del self.running_tasks[task.task_id]
-            
-            # Actualizar métricas
-            await self._update_metrics(task)
+            await self._update_task_metrics(task)
 
-    async def _handle_task_failure(self, task: Task) -> None:
-        """Maneja el fallo de una tarea"""
+    async def _handle_task_success(self, task: Task) -> None:
+        """Maneja la finalización exitosa de una tarea."""
+        task.status = TaskStatus.COMPLETED
+        self.completed_tasks[task.task_id] = task
+
+        logger.info(f"Tarea {task.task_id} completada exitosamente.")
+
+        if task.callback:
+            try:
+                await task.callback(task, task.result)
+            except Exception as e:
+                logger.error(f"Error en callback de tarea {task.task_id}: {str(e)}", exc_info=True)
+
+        await self._emit_event('task_completed', {
+            'task_id': task.task_id,
+            'execution_time': (task.completed_at - task.started_at).total_seconds() if task.completed_at and task.started_at else 0,
+            'result': task.result.data if task.result and hasattr(task.result, 'data') else None
+        })
+
+    async def _handle_task_failure(self, task: Task, worker_id: str) -> None:
+        """Maneja el fallo de una tarea, incluyendo lógica de reintentos."""
         task.retry_count += 1
         
         if task.retry_count <= task.max_retries:
-            # Reintento
-            logger.warning(f"Reintentando tarea {task.task_id} (intento {task.retry_count}/{task.max_retries})")
-            
+            logger.warning(f"Worker {worker_id}: Fallo en tarea {task.task_id} (intento {task.retry_count}/{task.max_retries}). Error: {task.error}. Reintentando...")
             task.status = TaskStatus.PENDING
-            task.started_at = None
+            task.started_at = None # Reset start time for retry
             
-            # Esperar antes de reintentar
             await asyncio.sleep(self.retry_delay)
             
-            # Reenviar a cola
             priority_value = task.priority.value
-            await self.task_queue.put((priority_value, task.created_at, task))
+            await self.task_queue.put((priority_value, task.created_at, task)) # Re-enqueue
+            self.pending_tasks_by_id[task.task_id] = task # Add back to lookup
             
-            # Emitir evento de reintento
-            await self._emit_event('task_retry', {
-                'task_id': task.task_id,
-                'retry_count': task.retry_count,
-                'error': task.error
-            })
-        
+            await self._emit_event('task_retry', {'task_id': task.task_id, 'retry_count': task.retry_count, 'error': task.error})
         else:
-            # Fallo definitivo
+            logger.error(f"Worker {worker_id}: Tarea {task.task_id} falló definitivamente después de {task.retry_count} intentos. Error: {task.error}")
             task.status = TaskStatus.FAILED
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.utcnow() # Mark completion time for failed task
             self.failed_tasks[task.task_id] = task
             
-            logger.error(f"Tarea falló definitivamente: {task.task_id} - {task.error}")
-            
-            # Emitir evento de fallo
-            await self._emit_event('task_failed', {
-                'task_id': task.task_id,
-                'error': task.error,
-                'retry_count': task.retry_count
-            })
+            await self._emit_event('task_failed', {'task_id': task.task_id, 'error': task.error, 'retry_count': task.retry_count})
 
-    async def _update_metrics(self, task: Task) -> None:
-        """Actualiza métricas del orquestador"""
+    async def _update_task_metrics(self, task: Task) -> None:
+        """Actualiza las métricas relacionadas con la ejecución de una tarea."""
         self.metrics['tasks_executed'] += 1
         
         if task.status == TaskStatus.COMPLETED:
@@ -548,22 +519,30 @@ class Orchestrator:
         logger.info("Health check detenido")
 
     async def _perform_health_check(self) -> None:
-        """Realiza verificación de salud del sistema"""
-        # Verificar agentes
-        unhealthy_agents = []
-        for agent_id, agent in self.registered_agents.items():
+        """Realiza verificación de salud del sistema, incluyendo agentes en paralelo."""
+
+        async def check_agent_health(agent_id: str, agent: BaseAgent) -> Optional[str]:
+            """Chequea la salud de un único agente y retorna su ID si no está saludable."""
             try:
-                # Verificar si el agente responde
                 health_context = {'operation': 'health_check'}
+                # Asumiendo que BaseAgent.process es una corutina
                 result = await asyncio.wait_for(agent.process(health_context), timeout=5.0)
-                
                 if not result.success:
-                    unhealthy_agents.append(agent_id)
-                    
+                    logger.warning(f"Agente {agent_id} reportó health check no exitoso: {result.error}")
+                    return agent_id
+            except asyncio.TimeoutError:
+                logger.warning(f"Agente {agent_id} timed out durante health check.")
+                return agent_id
             except Exception as e:
-                logger.warning(f"Agente {agent_id} no responde al health check: {str(e)}")
-                unhealthy_agents.append(agent_id)
-        
+                logger.warning(f"Excepción durante health check del agente {agent_id}: {str(e)}")
+                return agent_id
+            return None
+
+        # Verificar agentes en paralelo
+        agent_checks = [check_agent_health(agent_id, agent) for agent_id, agent in self.registered_agents.items()]
+        results = await asyncio.gather(*agent_checks)
+        unhealthy_agents = [agent_id for agent_id in results if agent_id is not None]
+
         # Verificar base de datos
         db_healthy = await db_manager.test_connection_async()
         
@@ -837,46 +816,41 @@ class Orchestrator:
         """
         # Buscar en tareas en ejecución
         if task_id in self.running_tasks:
-            task = self.running_tasks[task_id]
-            task.status = TaskStatus.CANCELLED
-            task.completed_at = datetime.utcnow()
-            
-            # Mover a tareas fallidas (para tracking)
-            self.failed_tasks[task_id] = task
-            del self.running_tasks[task_id]
-            
-            logger.info(f"Tarea cancelada: {task_id}")
-            
-            # Emitir evento
+            task_to_cancel = self.running_tasks[task_id]
+            task_to_cancel.status = TaskStatus.CANCELLED
+            task_to_cancel.completed_at = datetime.utcnow()
+            # Consider how to signal the running task to stop, if it's long-running.
+            # For now, we just mark it and it will be cleaned up by its worker.
+            # Or, if agent.process supports cancellation, call it here.
+            logger.info(f"Marcando tarea en ejecución {task_id} como cancelada.")
+            # No la movemos a failed_tasks aquí, _process_single_task lo hará si la tarea termina por cancelación.
+            # O si queremos forzarlo:
+            if task_id in self.running_tasks: del self.running_tasks[task_id] # remove from running
+            self.failed_tasks[task_id] = task_to_cancel # move to failed explicitly
             await self._emit_event('task_cancelled', {'task_id': task_id})
-            
             return True
-        
-        # Buscar en cola (más complejo, requiere reconstruir la cola)
-        temp_queue = []
-        found = False
-        
-        while not self.task_queue.empty():
-            item = await self.task_queue.get()
-            priority, created_at, task = item
+
+        # Buscar en tareas pendientes (en cola)
+        if task_id in self.pending_tasks_by_id:
+            task_to_cancel = self.pending_tasks_by_id[task_id]
+            task_to_cancel.status = TaskStatus.CANCELLED
+            task_to_cancel.completed_at = datetime.utcnow()
             
-            if task.task_id == task_id:
-                task.status = TaskStatus.CANCELLED
-                task.completed_at = datetime.utcnow()
-                self.failed_tasks[task_id] = task
-                found = True
-                logger.info(f"Tarea cancelada de la cola: {task_id}")
-            else:
-                temp_queue.append(item)
-        
-        # Restaurar cola
-        for item in temp_queue:
-            await self.task_queue.put(item)
-        
-        if found:
+            # Eliminar de pending_tasks_by_id
+            del self.pending_tasks_by_id[task_id]
+            
+            # Mover a failed_tasks
+            self.failed_tasks[task_id] = task_to_cancel
+            
+            logger.info(f"Tarea pendiente {task_id} cancelada y removida de la cola.")
             await self._emit_event('task_cancelled', {'task_id': task_id})
-        
-        return found
+            # Nota: La tarea todavía está en self.task_queue. El worker la descartará
+            # cuando la obtenga y vea su estado CANCELLED o si ya no está en pending_tasks_by_id.
+            # Para una eliminación más limpia de la PriorityQueue, se necesitaría una implementación de PQ que soporte remove.
+            return True
+            
+        logger.warning(f"Intento de cancelar tarea {task_id} no encontrada en ejecución ni pendiente.")
+        return False
 
     async def pause_workflow(self, workflow_id: str) -> bool:
         """Pausa un workflow"""
