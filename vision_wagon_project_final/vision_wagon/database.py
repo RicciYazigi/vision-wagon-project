@@ -7,13 +7,14 @@ import os
 import logging
 from typing import Optional, Dict, Any, List, Union
 from contextlib import contextmanager, asynccontextmanager
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, select, delete, func
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import StaticPool
 import asyncio
+from datetime import datetime, timedelta
 
-from .database_models import Base, Agent, AgentLog, Campaign, Task, Content, SecurityEvent, SystemMetric
+from .database_models import Base, Agent, AgentLog, Campaign, Task, Content, SecurityEvent, SystemMetric, AvatarPersonality
 
 logger = logging.getLogger(__name__)
 
@@ -159,15 +160,13 @@ class DatabaseManager:
     async def get_agents(self, agent_type: Optional[str] = None, status: Optional[str] = None) -> List[Agent]:
         """Obtiene lista de agentes con filtros opcionales"""
         async with self.get_async_session() as session:
-            query = session.query(Agent)
-            
+            stmt = select(Agent)
             if agent_type:
-                query = query.filter(Agent.agent_type == agent_type)
+                stmt = stmt.where(Agent.agent_type == agent_type)
             if status:
-                query = query.filter(Agent.status == status)
-                
-            result = await query.all()
-            return result
+                stmt = stmt.where(Agent.status == status)
+            result = await session.execute(stmt)
+            return result.scalars().all()
 
     async def update_agent(self, agent_id: str, update_data: Dict[str, Any]) -> Optional[Agent]:
         """Actualiza un agente"""
@@ -203,12 +202,12 @@ class DatabaseManager:
     async def get_agent_logs(self, agent_id: str, limit: int = 100) -> List[AgentLog]:
         """Obtiene logs de un agente"""
         async with self.get_async_session() as session:
-            result = await session.query(AgentLog)\
-                .filter(AgentLog.agent_id == agent_id)\
+            stmt = select(AgentLog)\
+                .where(AgentLog.agent_id == agent_id)\
                 .order_by(AgentLog.timestamp.desc())\
-                .limit(limit)\
-                .all()
-            return result
+                .limit(limit)
+            result = await session.execute(stmt)
+            return result.scalars().all()
 
     # Métodos CRUD para Campaign
     async def create_campaign(self, campaign_data: Dict[str, Any]) -> Campaign:
@@ -229,15 +228,13 @@ class DatabaseManager:
     async def get_campaigns(self, status: Optional[str] = None, campaign_type: Optional[str] = None) -> List[Campaign]:
         """Obtiene lista de campañas con filtros opcionales"""
         async with self.get_async_session() as session:
-            query = session.query(Campaign)
-            
+            stmt = select(Campaign)
             if status:
-                query = query.filter(Campaign.status == status)
+                stmt = stmt.where(Campaign.status == status)
             if campaign_type:
-                query = query.filter(Campaign.campaign_type == campaign_type)
-                
-            result = await query.all()
-            return result
+                stmt = stmt.where(Campaign.campaign_type == campaign_type)
+            result = await session.execute(stmt)
+            return result.scalars().all()
 
     # Métodos CRUD para Task
     async def create_task(self, task_data: Dict[str, Any]) -> Task:
@@ -258,15 +255,13 @@ class DatabaseManager:
     async def get_tasks(self, status: Optional[str] = None, agent_id: Optional[str] = None) -> List[Task]:
         """Obtiene lista de tareas con filtros opcionales"""
         async with self.get_async_session() as session:
-            query = session.query(Task)
-            
+            stmt = select(Task)
             if status:
-                query = query.filter(Task.status == status)
+                stmt = stmt.where(Task.status == status)
             if agent_id:
-                query = query.filter(Task.agent_id == agent_id)
-                
-            result = await query.all()
-            return result
+                stmt = stmt.where(Task.agent_id == agent_id)
+            result = await session.execute(stmt)
+            return result.scalars().all()
 
     async def update_task_status(self, task_id: str, status: str, progress: Optional[float] = None) -> Optional[Task]:
         """Actualiza el estado de una tarea"""
@@ -293,15 +288,14 @@ class DatabaseManager:
     async def get_security_events(self, severity: Optional[str] = None, resolved: Optional[bool] = None, limit: int = 100) -> List[SecurityEvent]:
         """Obtiene eventos de seguridad con filtros"""
         async with self.get_async_session() as session:
-            query = session.query(SecurityEvent)
-            
+            stmt = select(SecurityEvent)
             if severity:
-                query = query.filter(SecurityEvent.severity == severity)
+                stmt = stmt.where(SecurityEvent.severity == severity)
             if resolved is not None:
-                query = query.filter(SecurityEvent.resolved == resolved)
-                
-            result = await query.order_by(SecurityEvent.timestamp.desc()).limit(limit).all()
-            return result
+                stmt = stmt.where(SecurityEvent.resolved == resolved)
+            stmt = stmt.order_by(SecurityEvent.timestamp.desc()).limit(limit)
+            result = await session.execute(stmt)
+            return result.scalars().all()
 
     # Métodos para SystemMetric
     async def create_metric(self, metric_data: Dict[str, Any]) -> SystemMetric:
@@ -316,59 +310,50 @@ class DatabaseManager:
     async def get_metrics(self, metric_name: Optional[str] = None, source: Optional[str] = None, limit: int = 1000) -> List[SystemMetric]:
         """Obtiene métricas del sistema"""
         async with self.get_async_session() as session:
-            query = session.query(SystemMetric)
-            
+            stmt = select(SystemMetric)
             if metric_name:
-                query = query.filter(SystemMetric.metric_name == metric_name)
+                stmt = stmt.where(SystemMetric.metric_name == metric_name)
             if source:
-                query = query.filter(SystemMetric.source == source)
-                
-            result = await query.order_by(SystemMetric.timestamp.desc()).limit(limit).all()
-            return result
+                stmt = stmt.where(SystemMetric.source == source)
+            stmt = stmt.order_by(SystemMetric.timestamp.desc()).limit(limit)
+            result = await session.execute(stmt)
+            return result.scalars().all()
 
     async def cleanup_old_logs(self, days: int = 30) -> int:
         """Limpia logs antiguos"""
-        from datetime import datetime, timedelta
-        
         cutoff_date = datetime.utcnow() - timedelta(days=days)
         
         async with self.get_async_session() as session:
-            result = await session.query(AgentLog)\
-                .filter(AgentLog.timestamp < cutoff_date)\
-                .delete()
-            return result
+            stmt = delete(AgentLog).where(AgentLog.timestamp < cutoff_date)
+            result = await session.execute(stmt)
+            return result.rowcount
 
     async def get_system_stats(self) -> Dict[str, Any]:
         """Obtiene estadísticas generales del sistema"""
         async with self.get_async_session() as session:
-            # Contar agentes por estado
-            agent_stats = {}
-            agents = await session.query(Agent).all()
-            for agent in agents:
-                status = agent.status
-                agent_stats[status] = agent_stats.get(status, 0) + 1
+            agent_stmt = select(Agent.status, func.count(Agent.id)).group_by(Agent.status)
+            task_stmt = select(Task.status, func.count(Task.id)).group_by(Task.status)
+            campaign_stmt = select(Campaign.status, func.count(Campaign.id)).group_by(Campaign.status)
 
-            # Contar tareas por estado
-            task_stats = {}
-            tasks = await session.query(Task).all()
-            for task in tasks:
-                status = task.status
-                task_stats[status] = task_stats.get(status, 0) + 1
+            agent_results = await session.execute(agent_stmt)
+            task_results = await session.execute(task_stmt)
+            campaign_results = await session.execute(campaign_stmt)
 
-            # Contar campañas por estado
-            campaign_stats = {}
-            campaigns = await session.query(Campaign).all()
-            for campaign in campaigns:
-                status = campaign.status
-                campaign_stats[status] = campaign_stats.get(status, 0) + 1
+            agent_stats = {status: count for status, count in agent_results}
+            task_stats = {status: count for status, count in task_results}
+            campaign_stats = {status: count for status, count in campaign_results}
+
+            total_agents = sum(agent_stats.values())
+            total_tasks = sum(task_stats.values())
+            total_campaigns = sum(campaign_stats.values())
 
             return {
                 'agents': agent_stats,
                 'tasks': task_stats,
                 'campaigns': campaign_stats,
-                'total_agents': len(agents),
-                'total_tasks': len(tasks),
-                'total_campaigns': len(campaigns)
+                'total_agents': total_agents,
+                'total_tasks': total_tasks,
+                'total_campaigns': total_campaigns
             }
 
 # Instancia global del gestor de base de datos
@@ -395,29 +380,65 @@ async def get_db_session():
                 content.is_flagged = is_flagged
                 content.moderation_categories = moderation_categories
                 content.moderated_by = moderated_by
-                content.moderated_at = datetime.utcnow()
+                content.moderated_at = datetime.utcnow() # type: ignore
                 await session.flush()
                 await session.refresh(content)
             return content
 
+    async def get_content(self, content_id: str) -> Optional[Content]: # Added this method based on usage in assembly_agent
+        """Obtiene un contenido por su ID."""
+        async with self.get_async_session() as session:
+            result = await session.get(Content, content_id)
+            return result
 
+    async def create_content(self, content_data: Dict[str, Any]) -> Content: # Added this method based on usage in assembly_agent
+        """Crea un nuevo contenido en la base de datos"""
+        async with self.get_async_session() as session:
+            content = Content(**content_data)
+            session.add(content)
+            await session.flush()
+            await session.refresh(content)
+            return content
 
+    async def update_content(self, content_id: str, update_data: Dict[str, Any]) -> Optional[Content]: # Added this method based on usage in assembly_agent
+        """Actualiza un contenido"""
+        async with self.get_async_session() as session:
+            content = await session.get(Content, content_id)
+            if content:
+                for key, value in update_data.items():
+                    if hasattr(content, key):
+                        # Special handling for metadata to merge instead of overwrite
+                        if key == "content_metadata" and isinstance(getattr(content, key), dict) and isinstance(value, dict):
+                            current_metadata = getattr(content, key)
+                            current_metadata.update(value)
+                            setattr(content, key, current_metadata)
+                        else:
+                            setattr(content, key, value)
+                content.updated_at = datetime.utcnow() # type: ignore
+                await session.flush()
+                await session.refresh(content)
+            return content
 
     async def get_avatar_personality(self, avatar_id: str) -> Optional[Dict[str, Any]]:
         """Obtiene el perfil de personalidad de un avatar por su ID."""
         async with self.get_async_session() as session:
-            result = await session.query(AvatarPersonality).filter(AvatarPersonality.avatar_id == avatar_id).first()
-            if result:
-                return result.personality_profile
+            stmt = select(AvatarPersonality).where(AvatarPersonality.avatar_id == avatar_id)
+            result = await session.execute(stmt)
+            avatar_personality = result.scalar_one_or_none()
+            if avatar_personality:
+                return avatar_personality.personality_profile
             return None
 
     async def update_avatar_personality(self, avatar_id: str, personality_profile: Dict[str, Any]) -> AvatarPersonality:
         """Actualiza o crea el perfil de personalidad de un avatar."""
         async with self.get_async_session() as session:
-            avatar_personality = await session.query(AvatarPersonality).filter(AvatarPersonality.avatar_id == avatar_id).first()
+            stmt = select(AvatarPersonality).where(AvatarPersonality.avatar_id == avatar_id)
+            result = await session.execute(stmt)
+            avatar_personality = result.scalar_one_or_none()
+
             if avatar_personality:
                 avatar_personality.personality_profile = personality_profile
-                avatar_personality.updated_at = datetime.utcnow()
+                avatar_personality.updated_at = datetime.utcnow() # type: ignore
             else:
                 avatar_personality = AvatarPersonality(avatar_id=avatar_id, personality_profile=personality_profile)
                 session.add(avatar_personality)
